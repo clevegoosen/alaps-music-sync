@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ALAPS P2P Music Sync</title>
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background-color: #fce4b3;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px;
+    }
+
+    h1 {
+      margin-bottom: 20px;
+      font-size: 2.5rem;
+    }
+
+    button, input[type="file"] {
+      padding: 12px 20px;
+      margin: 10px;
+      font-size: 1rem;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+    }
+
+    #status, #nowPlaying {
+      font-weight: bold;
+      margin-top: 15px;
+    }
+
+    audio {
+      margin-top: 20px;
+      width: 100%;
+    }
+
+    progress {
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    #usersConnected {
+      margin-top: 15px;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>🎶 ALAPS P2P Music Sync</h1>
+
+  <input type="file" id="uploadSong" accept="audio/*" />
+  <button id="startBroadcast">Start Broadcast</button>
+
+  <p id="nowPlaying">Now Playing: None</p>
+  <p id="status">Status: Not Connected</p>
+  <p id="usersConnected">Connected Users: 0</p>
+
+  <audio id="player" controls></audio>
+  <progress id="progressBar" value="0" max="100"></progress>
+
+  <script>
+    const peer = new Peer();
+    const player = document.getElementById("player");
+    const status = document.getElementById("status");
+    const nowPlaying = document.getElementById("nowPlaying");
+    const usersConnected = document.getElementById("usersConnected");
+    const progressBar = document.getElementById("progressBar");
+    const uploadInput = document.getElementById("uploadSong");
+
+    let connections = [];
+    let isHost = false;
+    let audioBlob = null;
+
+    // Set self as host if no one else is
+    peer.on('open', id => {
+      console.log("Peer ID:", id);
+      if (!localStorage.getItem("alaps_host")) {
+        localStorage.setItem("alaps_host", id);
+        isHost = true;
+        status.textContent = "You are the host DJ.";
+      } else {
+        const hostId = localStorage.getItem("alaps_host");
+        connectToHost(hostId);
+      }
+    });
+
+    // Broadcast audio to connected peers
+    document.getElementById("startBroadcast").onclick = () => {
+      if (!isHost) return alert("Only the DJ can start a broadcast.");
+      const file = uploadInput.files[0];
+      if (!file) return alert("Please upload an audio file.");
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        audioBlob = e.target.result;
+        player.src = audioBlob;
+        player.play();
+        nowPlaying.textContent = `Now Playing: ${file.name}`;
+        connections.forEach(conn => {
+          conn.send({ type: "audio", data: audioBlob, name: file.name });
+        });
+      };
+      reader.readAsDataURL(file);
+    };
+
+    // When someone connects to the DJ
+    peer.on('connection', conn => {
+      connections.push(conn);
+      usersConnected.textContent = `Connected Users: ${connections.length}`;
+      conn.on('open', () => {
+        status.textContent = `User connected. Broadcasting when available.`;
+        if (audioBlob) {
+          conn.send({ type: "audio", data: audioBlob });
+        }
+      });
+    });
+
+    // Connect to the host and receive audio
+    function connectToHost(hostId) {
+      const conn = peer.connect(hostId);
+      conn.on('open', () => {
+        status.textContent = `Connected to DJ (${hostId})`;
+      });
+      conn.on('data', message => {
+        if (message.type === "audio") {
+          player.src = message.data;
+          player.play();
+          nowPlaying.textContent = `Now Playing: ${message.name || "Live Stream"}`;
+        }
+      });
+    }
+
+    // Progress bar sync
+    setInterval(() => {
+      if (player.duration) {
+        const progress = (player.currentTime / player.duration) * 100;
+        progressBar.value = progress;
+      }
+    }, 500);
+  </script>
+
+</body>
+</html>
